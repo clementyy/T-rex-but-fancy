@@ -1,0 +1,330 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Enhanced T-Rex — One File</title>
+<style>
+  :root{--bg:#e9f0ff;--ground:#6b4726;--text:#202124}
+  html,body{height:100%;margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,'Helvetica Neue',Arial}
+  body{background:linear-gradient(#bfe0ff,#e9f0ff);display:flex;align-items:center;justify-content:center}
+  #gameWrap{width:960px;max-width:95vw;background:linear-gradient(#dff3ff,#ffffff);border-radius:12px;box-shadow:0 10px 30px rgba(20,30,50,0.2);padding:12px}
+  header{display:flex;align-items:center;gap:12px;margin-bottom:8px}
+  h1{font-size:18px;margin:0;color:var(--text)}
+  #controls{margin-left:auto;display:flex;gap:8px;align-items:center}
+  select,input[type=range]{accent-color:#2b8cff}
+  #hud{display:flex;gap:12px;align-items:center}
+  #canvas{display:block;background:linear-gradient(#c7e7ff,#b6dfff);border-radius:8px;width:920px;height:240px}
+  footer{display:flex;justify-content:space-between;align-items:center;margin-top:8px;font-size:13px}
+  .btn{background:#2b8cff;color:white;padding:6px 10px;border-radius:6px;border:none;cursor:pointer}
+  .small{padding:4px 8px;font-size:13px}
+  #mobileButtons{display:none}
+  @media (max-width:600px){#gameWrap{padding:8px}#canvas{height:200px;width:calc(100vw - 40px)}#mobileButtons{display:flex;gap:8px;margin-top:8px;justify-content:center}}
+  .panel{background:rgba(255,255,255,0.6);padding:8px;border-radius:8px;backdrop-filter:blur(4px)}
+</style>
+</head>
+<body>
+  <div id="gameWrap">
+    <header>
+      <h1>Enhanced T-Rex — One File</h1>
+      <div id="controls" class="panel">
+        <label>Difficulty
+          <select id="difficulty"><option value="easy">Easy</option><option value="normal" selected>Normal</option><option value="hard">Hard</option></select>
+        </label>
+        <label>Volume<input id="volume" type="range" min="0" max="1" step="0.05" value="0.6"></label>
+        <button id="startBtn" class="btn small">Start</button>
+        <button id="pauseBtn" class="small">Pause</button>
+      </div>
+    </header>
+
+    <canvas id="canvas" width="920" height="240"></canvas>
+
+    <div style="display:flex;gap:12px;margin-top:8px;align-items:center">
+      <div class="panel" style="flex:1">
+        <div id="hud">
+          <div>Score: <strong id="score">0</strong></div>
+          <div>High: <strong id="high">0</strong></div>
+          <div>Speed: <strong id="speedLbl">0</strong></div>
+          <div>Power: <strong id="powerLbl">None</strong></div>
+        </div>
+      </div>
+      <div class="panel" style="width:300px;text-align:right">
+        <div style="font-size:12px">Controls: Space / ↑ = jump, ↓ = duck, P = pause</div>
+        <div style="font-size:12px">Mobile: Tap right to jump, left to duck</div>
+      </div>
+    </div>
+
+    <div id="mobileButtons">
+      <button id="jumpMobile" class="btn">Jump</button>
+      <button id="duckMobile" class="btn small">Duck</button>
+    </div>
+
+    <footer>
+      <div class="panel">Power-ups: <em>Invincibility (gold)</em>, <em>Double Jump (blue)</em>, <em>Slow (purple)</em></div>
+      <div class="panel">Save file: open console to export/import via localStorage</div>
+    </footer>
+  </div>
+
+<script>
+// Wrap everything in DOMContentLoaded to guarantee elements exist
+document.addEventListener('DOMContentLoaded', () => {
+  const canvas = document.getElementById('canvas');
+  if(!canvas){
+    document.body.innerHTML = '<div style="padding:40px;font-family:system-ui;color:#900">Error: canvas element not found. Please ensure the HTML includes a &lt;canvas id="canvas"&gt; element.</div>';
+    console.error('Canvas element with id "canvas" not found');
+    return;
+  }
+
+  const ctx = canvas.getContext('2d');
+  let W = canvas.width, H = canvas.height;
+
+  // HUD elements
+  const scoreEl = document.getElementById('score');
+  const highEl = document.getElementById('high');
+  const speedLbl = document.getElementById('speedLbl');
+  const powerLbl = document.getElementById('powerLbl');
+
+  const startBtn = document.getElementById('startBtn');
+  const pauseBtn = document.getElementById('pauseBtn');
+  const difficulty = document.getElementById('difficulty');
+  const volume = document.getElementById('volume');
+
+  const jumpMobile = document.getElementById('jumpMobile');
+  const duckMobile = document.getElementById('duckMobile');
+
+  // Defensive checks for required elements
+  if(!scoreEl || !highEl || !speedLbl || !powerLbl || !startBtn || !pauseBtn || !difficulty || !volume){
+    console.warn('One or more control elements are missing from the DOM.');
+  }
+
+  // Game state
+  let running=false, paused=false, last=0, dt=0;
+  let score=0, high=Number(localStorage.getItem('etr_high')||0);
+  if(highEl) highEl.textContent = high;
+
+  let speedBase = 6; // px/frame base
+  let speed = speedBase;
+  let gravity = 0.8;
+
+  // difficulty presets
+  const presets = {
+    easy:{base:4, spawn:1600, obstacleVar:800},
+    normal:{base:6, spawn:1100, obstacleVar:600},
+    hard:{base:8, spawn:850, obstacleVar:350}
+  };
+
+  // player
+  const player = {
+    x:80, y:0, w:44, h:44, vy:0, onGround:true, ducking:false,
+    frame:0, frameTimer:0
+  };
+
+  // world
+  const groundY = H - 40;
+
+  // environment
+  let clouds = [], mountains = [], obstacles = [], powerups = [];
+  let spawnTimer = 0; let spawnInterval = 1200;
+
+  // power-up definitions
+  const POWER_TYPES = {
+    inv: {color:'#ffdd57', duration:5000, label:'Invincible'},
+    dbl: {color:'#6fb3ff', duration:7000, label:'Double Jump'},
+    slow: {color:'#c48bff', duration:6000, label:'Slow'}
+  };
+  let activePower = null; let powerTimer = 0;
+
+  // sounds (simple oscillator beeps)
+  const audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+  function beep(freq,dur,vol=0.03){
+    if(!audioCtx) return;
+    try{
+      const o = audioCtx.createOscillator();
+      const g = audioCtx.createGain();
+      o.type='sine'; o.frequency.value=freq; g.gain.value=vol*(volume?Number(volume.value):0.6);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur/1000);
+    }catch(e){ console.warn('Audio error', e); }
+  }
+
+  function resetGame(){
+    obstacles = []; powerups = []; clouds = []; mountains = [];
+    score = 0; speed = presets[difficulty.value].base; spawnInterval = presets[difficulty.value].spawn;
+    player.y = groundY - player.h; player.vy=0; player.onGround=true; player.ducking=false;
+    activePower=null; powerTimer=0; running=true; paused=false; last = performance.now();
+    spawnTimer = 0; updateHUD();
+    // seed background
+    for(let i=0;i<6;i++) clouds.push({x:Math.random()*W, y:20+Math.random()*80, s:0.25+Math.random()*0.7});
+    for(let i=0;i<3;i++) mountains.push({x:i*400+100, y:groundY-60, w:300, h:60});
+  }
+
+  function updateHUD(){
+    if(scoreEl) scoreEl.textContent = Math.floor(score);
+    if(highEl) highEl.textContent = high;
+    if(speedLbl) speedLbl.textContent = Math.round(speed*10)/10;
+    if(powerLbl) powerLbl.textContent = activePower?POWER_TYPES[activePower].label:'None';
+  }
+
+  function spawnObstacle(){
+    if(Math.random()<0.6){
+      const h = 30 + Math.floor(Math.random()*24);
+      obstacles.push({type:'cactus',x:W+50,y:groundY-h,w:18,h:h,passed:false});
+    } else {
+      const y = groundY - 90 - Math.random()*40;
+      obstacles.push({type:'bird',x:W+50,y:y,w:34,h:24,vy:0,passed:false,frame:0});
+    }
+  }
+
+  function spawnPowerup(){
+    const keys = Object.keys(POWER_TYPES);
+    const t = keys[Math.floor(Math.random()*keys.length)];
+    powerups.push({type:t,x:W+50,y:groundY-130 - Math.random()*60,r:12});
+  }
+
+  // controls
+  let keys = {};
+  window.addEventListener('keydown',e=>{
+    if(e.key===' '||e.key==='ArrowUp'){ e.preventDefault(); keys['jump']=true; }
+    if(e.key==='ArrowDown'){ keys['duck']=true; }
+    if(e.key.toLowerCase()==='p'){ paused = !paused; if(pauseBtn) pauseBtn.textContent = paused?'Resume':'Pause'; }
+  });
+  window.addEventListener('keyup',e=>{
+    if(e.key===' '||e.key==='ArrowUp'){ keys['jump']=false; }
+    if(e.key==='ArrowDown'){ keys['duck']=false; }
+  });
+
+  // mobile buttons (may be null if hidden on desktop)
+  if(jumpMobile){ jumpMobile.addEventListener('touchstart',e=>{ e.preventDefault(); keys['jump']=true; }); jumpMobile.addEventListener('touchend',e=>{ e.preventDefault(); keys['jump']=false; }); }
+  if(duckMobile){ duckMobile.addEventListener('touchstart',e=>{ e.preventDefault(); keys['duck']=true; }); duckMobile.addEventListener('touchend',e=>{ e.preventDefault(); keys['duck']=false; }); }
+
+  // canvas touch: right half jump, left half duck
+  canvas.addEventListener('touchstart',e=>{
+    const t = e.touches[0]; const rect = canvas.getBoundingClientRect(); const x = t.clientX-rect.left;
+    if(x > rect.width/2) keys['jump']=true; else keys['duck']=true;
+  });
+  canvas.addEventListener('touchend',e=>{ keys['jump']=false; keys['duck']=false; });
+
+  // start/pause buttons
+  startBtn.addEventListener('click', async () => {
+    if(audioCtx.state === 'suspended') {
+      try {
+        await audioCtx.resume();
+      } catch (e) {
+        console.warn('AudioContext resume failed:', e);
+      }
+    }
+    resetGame();
+    requestAnimationFrame(loop);
+  });
+
+  pauseBtn.addEventListener('click',()=>{ paused = !paused; pauseBtn.textContent = paused?'Resume':'Pause'; });
+
+  difficulty.addEventListener('change',()=>{
+    const p = presets[difficulty.value]; speed = p.base; spawnInterval = p.spawn;
+  });
+
+  // main loop
+  function loop(t){
+    if(!running){ return; }
+    if(paused){ last = t; requestAnimationFrame(loop); drawPaused(); return; }
+    dt = t-last; last=t;
+    // cap dt
+    if(dt>60) dt=60;
+    // update
+    update(dt);
+    // draw
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  function update(ms){
+    // increase score and difficulty
+    score += 0.02 * speed;
+    speed += 0.00012 * ms; // small ramp
+
+    // power-up slow effect reduces speed when active
+    if(activePower==='slow'){
+      speed *= 0.995; // slight decel while active
+    }
+
+    spawnTimer += ms;
+    const nextSpawn = spawnInterval - Math.min(600,score*2) + (Math.random()*presets[difficulty.value].obstacleVar);
+    if(spawnTimer > nextSpawn){ spawnTimer=0; spawnObstacle(); if(Math.random()<0.12) spawnPowerup(); }
+
+    // update clouds & mountains (parallax)
+    clouds.forEach(c=>{ c.x -= speed*0.25*c.s; if(c.x < -60) c.x = W + Math.random()*80; });
+    mountains.forEach(m=>{ m.x -= speed*0.45; if(m.x < -400) m.x = W + Math.random()*200; });
+
+    // player physics
+    if(keys['jump']){
+      if(player.onGround){ player.vy = -13; player.onGround=false; beep(800,80); if(activePower==='dbl'){ player.canDouble=true; }
+      } else if(activePower==='dbl' && player.canDouble){ player.vy = -11; player.canDouble=false; beep(1000,60); }
+    }
+    if(keys['duck'] && player.onGround){ player.ducking=true; } else player.ducking=false;
+
+    player.vy += gravity * (activePower==='slow'?0.85:1);
+    player.y += player.vy; if(player.y >= groundY - player.h){ player.y = groundY - player.h; player.vy = 0; player.onGround=true; player.canDouble=false; }
+
+    // obstacle movement and collisions
+    for(let i=obstacles.length-1;i>=0;i--){
+      const ob = obstacles[i]; ob.x -= speed;
+      if(ob.type==='bird'){
+        ob.frame += 0.14 + speed*0.005; if(ob.frame>2) ob.frame=0;
+      }
+      if(!ob.passed && ob.x + ob.w < player.x){ ob.passed=true; score += 5; }
+      // remove offscreen
+      if(ob.x < -100) obstacles.splice(i,1);
+      // collision
+      if(!ob.passed && !isInvincible()){
+        const plrBox = getPlayerBox();
+        const obBox = {x:ob.x,y:ob.y,w:ob.w,h:ob.h||ob.h};
+        if(rectsIntersect(plrBox,obBox)){
+          gameOver(); return;
+        }
+      }
+    }
+
+    // power-up motion and pickup
+    for(let i=powerups.length-1;i>=0;i--){ const p=powerups[i]; p.x -= speed*0.9; if(p.x < -50) powerups.splice(i,1); else{
+        if(collideCircleRect(p, getPlayerBox())){ activatePower(p.type); powerups.splice(i,1); }
+    }}
+
+    // active power timer
+    if(activePower){ powerTimer -= ms; if(powerTimer<=0){ activePower=null; powerTimer=0; updateHUD(); } }
+
+    // scoring and highs
+    if(score > high){ high = Math.floor(score); localStorage.setItem('etr_high', high); }
+    updateHUD();
+  }
+
+  function getPlayerBox(){
+    if(player.ducking) return {x:player.x, y:player.y+18, w:player.w, h:player.h-18};
+    return {x:player.x, y:player.y, w:player.w, h:player.h};
+  }
+
+  function isInvincible(){ return activePower==='inv'; }
+
+  function activatePower(type){ activePower = type; powerTimer = POWER_TYPES[type].duration; updateHUD(); beep(1200,110); }
+
+  function collideCircleRect(c, r){
+    const cx = Math.max(r.x, Math.min(c.x, r.x + r.w));
+    const cy = Math.max(r.y, Math.min(c.y, r.y + r.h));
+    const dx = c.x - cx; const dy = c.y - cy; return (dx*dx + dy*dy) <= c.r*c.r;
+  }
+
+  function rectsIntersect(a,b){ return !(a.x + a.w < b.x || a.x > b.x + b.w || a.y + a.h < b.y || a.y > b.y + b.h); }
+
+  function gameOver(){ running=false; beep(220,300); // display overlay
+    ctx.fillStyle='rgba(0,0,0,0.5)'; ctx.fillRect(0,0,W,H);
+    ctx.fillStyle='white'; ctx.font='24px system-ui'; ctx.textAlign='center'; ctx.fillText('Game Over — Click Start to play again', W/2, H/2);
+  }
+
+  function drawPaused(){ ctx.fillStyle='rgba(0,0,0,0.2)'; ctx.fillRect(0,0,W,H); ctx.fillStyle='white'; ctx.font='18px system-ui'; ctx.textAlign='center'; ctx.fillText('Paused', W/2, H/2); }
+
+  function draw(){
+    ctx.clearRect(0,0,W,H);
+    const g = ctx.createLinearGradient(0,0,0,H); g.addColorStop(0,'#cfefff'); g.addColorStop(1,'#eaf6ff'); ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
+
+    clouds.forEach(c=>{ ctx.globalAlpha=0.9*c.s; drawCloud(c.x,c.y,28*c.s); ctx.globalAlpha=1; });
+
+    mountains
