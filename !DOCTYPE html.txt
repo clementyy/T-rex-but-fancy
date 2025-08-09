@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Enhanced T-Rex — One File</title>
+<style>
+  :root{--bg:#e9f0ff;--ground:#6b4726;--text:#202124}
+  html,body{height:100%;margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,'Helvetica Neue',Arial}
+  body{background:linear-gradient(#bfe0ff,#e9f0ff);display:flex;align-items:center;justify-content:center}
+  #gameWrap{width:960px;max-width:95vw;background:linear-gradient(#dff3ff,#ffffff);border-radius:12px;box-shadow:0 10px 30px rgba(20,30,50,0.2);padding:12px}
+  header{display:flex;align-items:center;gap:12px;margin-bottom:8px}
+  h1{font-size:18px;margin:0;color:var(--text)}
+  #controls{margin-left:auto;display:flex;gap:8px;align-items:center}
+  select,input[type=range]{accent-color:#2b8cff}
+  #hud{display:flex;gap:12px;align-items:center}
+  #canvas{display:block;background:linear-gradient(#c7e7ff,#b6dfff);border-radius:8px;width:920px;height:240px}
+  footer{display:flex;justify-content:space-between;align-items:center;margin-top:8px;font-size:13px}
+  .btn{background:#2b8cff;color:white;padding:6px 10px;border-radius:6px;border:none;cursor:pointer}
+  .small{padding:4px 8px;font-size:13px}
+  #mobileButtons{display:none}
+  @media (max-width:600px){#gameWrap{padding:8px}#canvas{height:200px;width:calc(100vw - 40px)}#mobileButtons{display:flex;gap:8px;margin-top:8px;justify-content:center}}
+  .panel{background:rgba(255,255,255,0.6);padding:8px;border-radius:8px;backdrop-filter:blur(4px)}
+</style>
+</head>
+<body>
+  <div id="gameWrap">
+    <header>
+      <h1>Enhanced T-Rex — One File</h1>
+      <div id="controls" class="panel">
+        <label>Difficulty
+          <select id="difficulty"><option value="easy">Easy</option><option value="normal" selected>Normal</option><option value="hard">Hard</option></select>
+        </label>
+        <label>Volume<input id="volume" type="range" min="0" max="1" step="0.05" value="0.6"></label>
+        <button id="startBtn" class="btn small">Start</button>
+        <button id="pauseBtn" class="small">Pause</button>
+      </div>
+    </header>
+
+    <canvas id="canvas" width="920" height="240"></canvas>
+
+    <div style="display:flex;gap:12px;margin-top:8px;align-items:center">
+      <div class="panel" style="flex:1">
+        <div id="hud">
+          <div>Score: <strong id="score">0</strong></div>
+          <div>High: <strong id="high">0</strong></div>
+          <div>Speed: <strong id="speedLbl">0</strong></div>
+          <div>Power: <strong id="powerLbl">None</strong></div>
+        </div>
+      </div>
+      <div class="panel" style="width:300px;text-align:right">
+        <div style="font-size:12px">Controls: Space / ↑ = jump, ↓ = duck, P = pause</div>
+        <div style="font-size:12px">Mobile: Tap right to jump, left to duck</div>
+      </div>
+    </div>
+
+    <div id="mobileButtons">
+      <button id="jumpMobile" class="btn">Jump</button>
+      <button id="duckMobile" class="btn small">Duck</button>
+    </div>
+
+    <footer>
+      <div class="panel">Power-ups: <em>Invincibility (gold)</em>, <em>Double Jump (blue)</em>, <em>Slow (purple)</em></div>
+      <div class="panel">Save file: open console to export/import via localStorage</div>
+    </footer>
+  </div>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  const canvas = document.getElementById('canvas');
+  if(!canvas){
+    document.body.innerHTML = '<div style="padding:40px;font-family:system-ui;color:#900">Error: canvas element not found. Please ensure the HTML includes a &lt;canvas id="canvas"&gt; element.</div>';
+    console.error('Canvas element with id "canvas" not found');
+    return;
+  }
+
+  const ctx = canvas
